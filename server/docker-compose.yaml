@@ -1,0 +1,18 @@
+services:
+  gsd-reader:
+    build: .
+    container_name: gsd-reader
+    restart: unless-stopped
+    volumes:
+      - ./persistent:/data
+    environment:
+      - PORT=8080
+      - AUTH_USER=${AUTH_USER}
+      - AUTH_PASS=${AUTH_PASS}
+      - TZ=${TZ:-UTC}
+    networks:
+      - frontend
+
+networks:
+  frontend:
+    external: true
