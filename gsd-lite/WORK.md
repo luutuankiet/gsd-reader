@@ -3,21 +3,22 @@
 ## 1. Current Understanding
 
 <current_mode>
-execution
+active
 </current_mode>
 
 <active_task>
-Repo migration complete. npm v0.2.27 published with fetch fix.
+none
 </active_task>
 
 <parked_tasks>
 - PR preview builds via pkg-pr-new (workflow is in place, untested)
 - Per-project auth on server
-- Clean up old plugins/reader-vite/ in gsd-lite monorepo
+- Add deprecation notice to plugins/reader-vite in gsd-lite repo pointing to this monorepo
+- Set up Hetzner to deploy from GitHub monorepo instead of local copy
 </parked_tasks>
 
 <vision>
-Central distribution layer for GSD-Lite artifacts. Any remote session can push context to a readable dashboard with a single command, regardless of client.
+Central distribution layer for GSD-Lite artifacts. Any remote session can push context to a readable dashboard with a single command, regardless of client. Index UI makes 30+ projects navigable.
 </vision>
 
 <decisions>
@@ -25,6 +26,10 @@ Central distribution layer for GSD-Lite artifacts. Any remote session can push c
 - Use npm OIDC trusted publishing (no secrets in CI)
 - Server credentials externalized via .env (was hardcoded)
 - Node.js autoSelectFamily disabled to fix fetch on dual-stack DNS with unreachable IPv6
+- Index UI is server-rendered Go template with client-side JS (not a separate SPA build)
+- Origin base_path extracted from uploaded index.html for server/mount context in path display
+- Path truncation: first 2 segments (server ID like /home/ken) + last 2 (parent/project), ellipsis between
+- GSD-Lite stamped on Hetzner deployment at /root/dev/gsd-reader/gsd-lite/
 </decisions>
 
 <blockers>
@@ -32,7 +37,7 @@ None
 </blockers>
 
 <next_action>
-Verify npm v0.2.27 works end-to-end from pi server: npx -y @luutuankiet/gsd-reader@latest dump
+Set up Hetzner to deploy from GitHub monorepo instead of local copy
 </next_action>
 
 ---
@@ -46,6 +51,10 @@ Verify npm v0.2.27 works end-to-end from pi server: npx -y @luutuankiet/gsd-read
 | 2026-03-24 | Set up npm OIDC publish workflow | Zero-secret CI, provenance attestation |
 | 2026-03-24 | Added Go server to monorepo | Client + server in one place, credentials externalized |
 | 2026-03-24 | Published v0.2.27 to npm | First release from new repo with fetch fix |
+| 2026-04-06 | Index UI overhaul: pagination, search, metadata, bulk delete | 37 projects now navigable with keyword search and server-context paths |
+| 2026-04-06 | Path display: origin base_path extraction + smart truncation | Users can map projects to servers at a glance (/home/ken = Thinkpad, /root/dev = Hetzner) |
+| 2026-04-06 | Synced latest server/main.go to monorepo (de93b94) | Monorepo now has all UI improvements — 809 insertions |
+| 2026-04-06 | GSD-Lite stamped on Hetzner deployment | /root/dev/gsd-reader/gsd-lite/ now discoverable via list_gsd_lite_dirs |
 
 ---
 
@@ -176,3 +185,83 @@ The original `docker-compose.yaml` on hetzner had `AUTH_PASS=659142` hardcoded. 
 **What was decided:** Reader is now a standalone repo with its own npm publish pipeline; server code co-located
 **Next action:** Verify v0.2.27 works from pi server; clean up old plugins/reader-vite/ in gsd-lite monorepo
 **If pivoting:** The old code still exists at `gsd-lite/plugins/reader-vite/` — it has the same fix applied locally but is no longer the publish source
+
+---
+
+### [LOG-003] - [EXEC] - Index UI overhaul + monorepo sync + Hetzner stamp - Task: ad-hoc
+**Timestamp:** 2026-04-06
+**Depends On:** LOG-002 (monorepo established, server code co-located)
+
+---
+
+#### What Was Built
+
+Rewrote the Go server's index page from a bare project list into a full-featured dashboard. All changes in `server/main.go` — the entire UI is an inline Go HTML template with ~400 lines of client-side JS.
+
+#### Features Added
+
+**Pagination** — configurable page size (10/15/25/50), smart page range with ellipsis for large sets, scroll-to-top on page change.
+
+**Keyword search** — debounced (200ms) client-side filter across project name + PROJECT.md description + origin path. Multi-term AND matching (e.g., "hetzner go" finds gsd-reader). Only searches PROJECT.md content (extracted via base64 decode), not full WORK.md logs — deliberate choice since some projects have 80+ log entries.
+
+**Project metadata per card:**
+- Project name (linked to reader app)
+- Last modified date
+- Origin path with smart truncation + tooltip + copy button
+- PROJECT.md description (collapsible, overflow-detected "more/less" toggle)
+
+**Path display** — extracts `window.__GSD_BASE_PATH__` from each project's `index.html`. This is the absolute path from the origin machine that uploaded the project. Truncation logic:
+- ≤4 path segments → show full path
+- >4 segments → first 2 (server identifier) + `…` + last 2 (project context)
+
+Examples after truncation:
+
+| Display Path | Server |
+|---|---|
+| `/root/dev/claude-docker` | Hetzner |
+| `/Users/luutuankiet/dev/looker_dev_tools` | Mac |
+| `/home/ubuntu/dev/fs-mcp` | Personal/Ubuntu |
+| `/home/ken/…/demo_joon_agents/joon-agents` | Thinkpad |
+| `/workspaces/EVERYTHING/…/worktrees/feat__lookml_dashboard` | Joon VM |
+
+**Bulk delete** — checkbox per project, "Select All" for current page, confirmation modal listing selected projects, `POST /api/projects/delete` endpoint with `os.RemoveAll`. Toast notifications for success/error.
+
+#### New Go Functions
+
+| Function | Purpose |
+|---|---|
+| `extractProjectDescription(indexPath)` | Decodes `__PROJECT_CONTENT_B64__` from index.html, parses PROJECT.md, returns first substantial paragraph (>20 chars, skips headers/stamps) |
+| `extractBasePath(indexPath)` | Decodes `__GSD_BASE_PATH__` from index.html, strips `/gsd-lite` suffix, applies smart truncation |
+| `handleAPIProjects(w, r)` | `GET /api/projects` — returns JSON array of all projects with metadata |
+| `handleAPIDelete(w, r)` | `POST /api/projects/delete` — accepts `{"paths": [...]}`, removes directories, returns `{"deleted": [...]}` |
+
+#### Monorepo Consolidation
+
+Three copies existed before this session:
+1. **Hetzner** `/root/dev/gsd-reader/main.go` — live server, **no git repo**
+2. **Personal** `/home/ubuntu/dev/gsd-lite/plugins/reader-vite/` — original client, in `luutuankiet/gsd-lite` repo
+3. **Personal** `/home/ubuntu/dev/gsd-reader-migrate/` — monorepo at `luutuankiet/gsd-reader`
+
+**Action:** Cross-host file transfer via base64 encoding. Hetzner's `main.go` (1232 lines) → base64 → decoded on personal host → `server/main.go`. MD5 verified: `a21c025c` on both sides. Client code was already identical (only diff: version 0.2.26→0.2.27 and repo URL).
+
+Pushed as commit `de93b94` on `luutuankiet/gsd-reader` main branch.
+
+#### GSD-Lite Stamp on Hetzner
+
+Scaffolded gsd-lite at `/root/dev/gsd-reader/gsd-lite/` with full PROJECT.md, ARCHITECTURE.md, and WORK.md. Removed `.claude/` agent scaffolding (not needed for non-git deployment directory). Project now discoverable via `list_gsd_lite_dirs` on Hetzner (4th project alongside artifact-server, claude-docker, hetzner-server).
+
+#### Iteration Detail: Path Display
+
+The path display went through 3 iterations in this session:
+1. **v1:** Stripped `gsd-lite` suffix, showed data-dir subpath → too little context (just `claude-docker`)
+2. **v2:** Extracted `__GSD_BASE_PATH__`, truncated to first 1 + last 2 segments → collapsed the server-identifying segment (`/home/…/dev/fs-mcp` — could be any host)
+3. **v3 (final):** First **2** segments + last 2 → preserves server identity (`/home/ubuntu/dev/fs-mcp` = clearly Personal host)
+
+---
+
+📦 STATELESS HANDOFF (for future agents reading this log)
+**Dependency chain:** LOG-003 ← LOG-002 ← LOG-001
+**What was decided:** Index UI overhauled with pagination/search/delete/metadata. Origin base_path used for path display. Monorepo synced (de93b94). Hetzner deployment stamped with gsd-lite.
+**Next action:** (1) Set up Hetzner to deploy from GitHub monorepo instead of local copy. (2) Add deprecation notice to `plugins/reader-vite/` in gsd-lite repo.
+**Key file:** `server/main.go` — entire server is one file, index template is inline starting ~L60
+**If pivoting:** Live Hetzner deployment has identical code to monorepo's `server/main.go` as of de93b94. The Hetzner copy at `/root/dev/gsd-reader/` also has a gsd-lite stamp with its own LOG-001.

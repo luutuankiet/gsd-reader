@@ -13,6 +13,27 @@
 | `.github/workflows/` | npm OIDC publish on `v*` tags, PR preview via `pkg-pr-new` |
 | `gsd-lite/` | This project's own GSD-Lite artifacts (meta: the reader reading itself) |
 
+## Server API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/` | Index page — paginated project list with search, metadata, bulk delete UI |
+| GET | `/<path>/` | Serve project's reader app (static index.html + assets) |
+| POST | `/upload/<path>` | Upload tar.gz of full dist/ build |
+| POST | `/upload-markdown/<path>` | Lightweight upload: JSON with work/project/architecture → server-side render |
+| GET | `/api/projects` | JSON array of all projects with name, path, full_path, description, mod_time |
+| POST | `/api/projects/delete` | Bulk delete: `{"paths": [...]}` → `{"deleted": [...], "errors": [...]}` |
+
+## Index UI Architecture
+
+The index page is a **server-rendered Go template with embedded client-side JS** (~400 lines). Not a separate build — lives inline in `main.go`'s `indexTemplate` variable.
+
+**Data flow:** `listProjects()` walks `/data/`, extracts metadata from each project's `index.html` (base64-decoded PROJECT.md for description, `__GSD_BASE_PATH__` for origin path), serializes as JSON → injected into template as `ALL_PROJECTS` JS variable → client-side search/filter/paginate/delete.
+
+**Key functions in main.go:**
+- `extractProjectDescription()` — regex `__PROJECT_CONTENT_B64__` → base64 decode → parse first substantial paragraph
+- `extractBasePath()` — regex `__GSD_BASE_PATH__` → strip `/gsd-lite` → smart truncation (first 2 + last 2 path segments)
+
 ## Tech Stack
 
 | Component | Technology | Why |
